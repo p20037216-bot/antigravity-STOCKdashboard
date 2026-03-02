@@ -1,3 +1,5 @@
+import json
+
 from src.memory import MemoryManager
 
 
@@ -65,12 +67,13 @@ def test_context_window_skips_empty_summary_message(tmp_path):
 
 def test_loads_legacy_memory_format(tmp_path):
     legacy_file = tmp_path / "legacy.json"
+    summary_file = tmp_path / "summary.md"
     legacy_payload = [{"role": "user", "content": "legacy hi", "metadata": {}}]
     with open(legacy_file, "w", encoding="utf-8") as f:
         json.dump(legacy_payload, f)
 
     manager = MemoryManager(
-        memory_file=str(memory_file),
+        memory_file=str(legacy_file),
         summary_file=str(summary_file),
     )
 
