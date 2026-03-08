@@ -101,7 +101,7 @@ def summarize_global_news(news_data: dict) -> dict:
         return {
             "summary_points": ["Could not parse AI response", text]
         }
-        except Exception as e:
+    except Exception as e:
         print(f"News Summarization Error: {e}")
         return {
             "summary_points": ["Error requesting news summary from Gemini API."]
