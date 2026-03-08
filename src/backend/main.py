@@ -6,7 +6,7 @@ from .indicators import apply_indicators
 from .backtester import run_backtest
 from .ai_reporter import generate_investment_report, summarize_global_news
 from .news_crawler import get_global_news
-from .macro_data import get_all_macro_data
+from .macro_data import get_all_macro_data, FALLBACK_DATA
 import pandas as pd
 from datetime import datetime, timedelta
 import dotenv
@@ -284,7 +284,7 @@ async def get_macro_indicators():
         traceback.print_exc()
         return {
             "status": "warning",
-            "indicators": MOCK_DATA,
+            "indicators": FALLBACK_DATA,
             "ai_summary": [f"데이터를 불러오는 중 오류가 발생했습니다: {str(e)}", "FRED API KEY를 점검해주세요."]
         }
 

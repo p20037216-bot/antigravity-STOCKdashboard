@@ -21,12 +21,18 @@ INDICATORS = {
     "fed_funds": {"id": "DFF", "name": "연방기금금리", "desc": "미국 기준금리. 금리 인하 사이클이 시작되면 일반적으로 시장에 유동성이 공급됩니다."},
 }
 
-# Pre-defined mock data in case FRED API key is missing or fails
-MOCK_DATA = [
-    {"id": "10y_2y", "name": "장단기 금리차 (10y-2y)", "value": -0.32, "impact": "negative", "trend": "down", "desc": "10년물과 2년물 국채 금리 차이. 음수(-)일 경우 경기 침체 전조 현상으로 해석됩니다.", "history": [{"date": "2024-01-01", "value": -0.5}, {"date": "2024-03-01", "value": -0.32}]},
-    {"id": "high_yield", "name": "하이일드 스프레드", "value": 3.42, "impact": "positive", "trend": "flat", "desc": "위험 기업과 안전 국가의 채권 금리 차이. 높을수록 기업 부도 위험이 커집니다.", "history": [{"date": "2024-01-01", "value": 4.0}, {"date": "2024-03-01", "value": 3.42}]},
-    {"id": "vix", "name": "공포지수 (VIX)", "value": 14.2, "impact": "positive", "trend": "down", "desc": "S&P500의 향후 30일 변동성 기대치. 20 이하면 안정, 30 이상이면 패닉 장세입니다.", "history": [{"date": "2024-01-01", "value": 16.0}, {"date": "2024-03-01", "value": 14.2}]},
-]
+# If API fails, provide a fallback array containing all 13 indicators so the UI doesn't break
+FALLBACK_DATA = []
+for key, info in INDICATORS.items():
+    FALLBACK_DATA.append({
+        "id": key,
+        "name": info["name"],
+        "value": 0,
+        "impact": "neutral",
+        "trend": "flat",
+        "desc": info["desc"],
+        "history": [{"date": "2024-01-01", "value": 0}, {"date": "2024-03-01", "value": 0}]
+    })
 
 def determine_impact(key, current_val, prev_val):
     """Determine if the current state is positive, negative, or neutral for the stock market."""
@@ -154,15 +160,15 @@ async def get_all_macro_data():
     """Asynchronously fetch all 13 macro indicators"""
     fred_key = os.getenv("FRED_API_KEY")
     
-    # If no valid FRED key, return mock data immediately to prevent crashes
+    # If no valid FRED key, return fallback data immediately to prevent crashes
     if not fred_key or fred_key == "EXAMPLE_FRED_API_KEY_HERE":
-        return MOCK_DATA
+        return FALLBACK_DATA
         
     try:
         fred = Fred(api_key=fred_key)
     except Exception as e:
         print(f"FRED Auth failed: {e}")
-        return MOCK_DATA
+        return FALLBACK_DATA
         
     # Last 6 months
     start_date = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
@@ -190,7 +196,7 @@ async def get_all_macro_data():
             results.append(vix_res)
             
     # If API rate limits hit and nothing returned, fallback to mock
-    if len(results) == 0:
-        return MOCK_DATA
+    if len(results) < 5:
+        return FALLBACK_DATA
         
     return results

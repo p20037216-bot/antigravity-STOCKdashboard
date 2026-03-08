@@ -6,10 +6,13 @@ from datetime import datetime, timedelta
 def get_stock_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
     """Download historical stock data from Yahoo Finance."""
     try:
-        # Download data
         data = yf.download(ticker, start=start_date, end=end_date)
         if data.empty:
-            return data
+            return pd.DataFrame()
+            
+        # Ensure index is timezone naive to prevent comparison errors in chart filtering
+        if data.index.tz is not None:
+            data.index = data.index.tz_localize(None)
             
         # Flatten multiindex columns from newer yfinance versions if needed
         if hasattr(data.columns, 'levels') and 'Ticker' in data.columns.names:
@@ -29,18 +32,36 @@ def get_stock_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 def get_crypto_data(symbol: str, timeframe: str = '1d', limit: int = 1825) -> pd.DataFrame:
-    """Download historical crypto data from Binance via CCXT. 1825 days is approx 5 years."""
+    """Download historical crypto data via yfinance to avoid CCXT geo-blocks."""
     try:
-        exchange = ccxt.binance()
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['Date'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('Date', inplace=True)
-        df.drop('timestamp', axis=1, inplace=True)
-        return df
+        if '/' in symbol:
+            base = symbol.split('/')[0]
+            ticker = f"{base}-USD"
+        else:
+            ticker = f"{symbol}-USD"
+            
+        data = yf.download(ticker, period="5y", progress=False)
+        if data.empty:
+            return pd.DataFrame()
+            
+        # Ensure index is timezone naive
+        if data.index.tz is not None:
+            data.index = data.index.tz_localize(None)
+            
+        if hasattr(data.columns, 'levels') and 'Ticker' in data.columns.names:
+            data = data.xs(ticker, level='Ticker', axis=1)
+            
+        data = data.rename(columns={
+            'Open': 'open',
+            'High': 'high',
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume'
+        })
+        return data
     except Exception as e:
         print(f"Error fetching crypto data for {symbol}: {e}")
-        return None
+        return pd.DataFrame()
 
 def get_valuation_metrics(symbol: str) -> dict:
     """Fetch fundamental valuation metrics from Yahoo Finance."""
