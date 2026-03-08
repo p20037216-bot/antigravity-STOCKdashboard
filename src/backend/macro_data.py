@@ -189,15 +189,26 @@ async def get_all_macro_data():
         # Submit VIX task
         future_vix = executor.submit(fetch_vix, start_date)
         
-        for future in concurrent.futures.as_completed(future_to_key):
-            res = future.result()
-            if res:
-                results.append(res)
+        try:
+            for future in concurrent.futures.as_completed(future_to_key, timeout=15):
+                try:
+                    res = future.result()
+                    if res:
+                        results.append(res)
+                except Exception as e:
+                    print(f"FRED fetch error: {e}")
+        except concurrent.futures.TimeoutError:
+            print("Timeout reached while waiting for FRED API calls")
                 
-        # Get VIX
-        vix_res = future_vix.result()
-        if vix_res:
-            results.append(vix_res)
+        # Get VIX with timeout
+        try:
+            vix_res = future_vix.result(timeout=5)
+            if vix_res:
+                results.append(vix_res)
+        except concurrent.futures.TimeoutError:
+            print("VIX fetch timeout")
+        except Exception as e:
+            print(f"VIX fetch error: {e}")
             
     # If API rate limits hit and nothing returned, fallback to mock
     if len(results) < 5:
