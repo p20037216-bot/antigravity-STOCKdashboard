@@ -6,6 +6,7 @@ from .indicators import apply_indicators
 from .backtester import run_backtest
 from .ai_reporter import generate_investment_report, summarize_global_news
 from .news_crawler import get_global_news
+from .macro_data import get_all_macro_data
 import pandas as pd
 from datetime import datetime, timedelta
 import dotenv
@@ -237,40 +238,44 @@ async def compare_valuations(payload: Dict[str, Any] = Body(...)):
 
 @app.get("/api/macro")
 async def get_macro_indicators():
-    """Fetches key macroeconomic indicators using FRED API (if available) and provides AI summary."""
-    # Note: FRED API requires a key. For demonstration, returning mock FRED data 
-    # if fredapi cannot be initialized to prevent crashing the dashboard.
-    from fredapi import Fred
-    # Use environment FRED_API_KEY if exists, else return predefined structure
-    fred_key = os.getenv("FRED_API_KEY")
+    """Fetches key macroeconomic indicators using FRED API and YFinance."""
+    indicators = await get_all_macro_data()
     
-    macro_data = {
-        "status": "warning",  # stable, warning, risk
-        "liquidity": -1.2,
-        "yield_spread_10y2y": -0.45,
-        "yield_spread_10y3m": -1.12,
-        "high_yield_spread": 4.5,
-        "ai_summary": [
-            "현재 미국 장단기 금리(10년-2년) 역전 상태가 지속되고 있어 경기 침체 우려가 남아 있습니다.",
-            "시장 전체의 순유동성(Net Liquidity)이 소폭 감소세를 보이며 주식 시장의 상승 동력을 일부 제한하고 있습니다.",
-            "하이일드 스프레드는 안정권이나 변동성에 유의할 시점입니다."
-        ]
-    }
+    # Calculate overall traffic light status (how many negative signals?)
+    negative_count = sum(1 for item in indicators if item.get("impact") == "negative")
     
-    if fred_key and "EXAMPLE" not in fred_key:
+    status = "stable"
+    if negative_count >= 5:
+        status = "risk"
+    elif negative_count >= 2:
+        status = "warning"
+        
+    ai_summary = [
+        "13개의 거시경제 지표 데이터를 바탕으로 분석한 기본 코멘트입니다.",
+        "현재 전체 지표 중 부정적 신호를 보내는 지표 개수를 주시하세요."
+    ]
+        
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if api_key and "EXAMPLEKEY" not in api_key:
         try:
-            fred = Fred(api_key=fred_key)
-            # Fetch real spread if possible
-            t10y2y = fred.get_series('T10Y2Y').dropna().iloc[-1]
-            macro_data["yield_spread_10y2y"] = round(float(t10y2y), 2)
-            if t10y2y < 0:
-                macro_data["status"] = "risk"
+            import google.generativeai as genai
+            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+            client = genai.Client(api_key=api_key)
+            prompt = f"투자전문가로서 거시경제 지표 요약을 보고 시장을 3개의 불릿포인트 문장으로(각각 짧게) 요약해주세요. 위험지표 갯수: {negative_count}개. 현재상태: {status}. 데이터일부: {indicators[:5]}"
+            response = client.models.generate_content(model=model_name, contents=prompt)
+            lines = [line.strip("- *").strip() for line in response.text.split("\n") if line.strip() and ("-" in line or "*" in line)]
+            if lines:
+                ai_summary = lines[:3]
             else:
-                macro_data["status"] = "stable"
+                ai_summary = [response.text]
         except Exception as e:
-            print(f"FRED API Error: {e}")
+            print(f"Macro AI Summary Error: {e}")
             
-    return macro_data
+    return {
+        "status": status,
+        "indicators": indicators,
+        "ai_summary": ai_summary
+    }
 
 @app.post("/api/chat")
 async def chat_with_ai(payload: Dict[str, Any] = Body(...)):
