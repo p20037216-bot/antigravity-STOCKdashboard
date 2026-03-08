@@ -67,12 +67,15 @@ function App() {
       .catch(err => console.error("Failed to fetch trending:", err));
   }, []);
 
-  const fetchChartData = async () => {
+  const fetchChartData = async (overrideStart, overrideEnd) => {
     setLoadingChart(true);
     try {
       const payload = { symbols: selectedAssets };
-      if (startDate) payload.start_date = startDate;
-      if (endDate) payload.end_date = endDate;
+      const startParam = typeof overrideStart === 'string' ? overrideStart : startDate;
+      const endParam = typeof overrideEnd === 'string' ? overrideEnd : endDate;
+
+      if (startParam) payload.start_date = startParam;
+      if (endParam) payload.end_date = endParam;
 
       const response = await fetch(`${API_BASE}/api/compare/chart`, {
         method: 'POST',
@@ -86,6 +89,31 @@ function App() {
     } finally {
       setLoadingChart(false);
     }
+  };
+
+  const handlePresetDate = (preset) => {
+    const end = new Date();
+    const start = new Date();
+
+    if (preset === '1M') {
+      start.setMonth(start.getMonth() - 1);
+    } else if (preset === '3M') {
+      start.setMonth(start.getMonth() - 3);
+    } else if (preset === '6M') {
+      start.setMonth(start.getMonth() - 6);
+    } else if (preset === '1Y') {
+      start.setFullYear(start.getFullYear() - 1);
+    } else if (preset === 'YTD') {
+      start.setMonth(0);
+      start.setDate(1);
+    }
+
+    const endStr = end.toISOString().split('T')[0];
+    const startStr = start.toISOString().split('T')[0];
+
+    setEndDate(endStr);
+    setStartDate(startStr);
+    fetchChartData(startStr, endStr);
   };
 
   const fetchValuationData = async () => {
@@ -295,28 +323,44 @@ function App() {
           {activeTab === 'chart' && (
             <div className="animate-in fade-in duration-500">
               <div className="mb-4 bg-white p-3 sm:p-4 border rounded shadow-sm flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-                <span className="font-bold text-gray-700 text-sm flex items-center gap-1"><TrendingUp size={16} /> 차트 기간:</span>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={e => setStartDate(e.target.value)}
-                    className="flex-1 sm:flex-none border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
-                  <span className="text-gray-400">~</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={e => setEndDate(e.target.value)}
-                    className="flex-1 sm:flex-none border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none"
-                  />
+                <div className="flex flex-col gap-2 w-full">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+                    <span className="font-bold text-gray-700 text-sm flex items-center gap-1 whitespace-nowrap"><TrendingUp size={16} /> 차트 기간:</span>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={e => setStartDate(e.target.value)}
+                        className="flex-1 sm:flex-none border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                      <span className="text-gray-400">~</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={e => setEndDate(e.target.value)}
+                        className="flex-1 sm:flex-none border border-gray-300 rounded px-2 py-1.5 text-sm focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={fetchChartData}
+                      className="w-full sm:w-auto sm:ml-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 sm:py-1.5 rounded font-bold text-sm transition-colors"
+                    >
+                      조회
+                    </button>
+                  </div>
+                  {/* Preset Buttons */}
+                  <div className="flex gap-1.5 sm:gap-2 mt-1 sm:mt-0 sm:ml-[86px] overflow-x-auto hide-scrollbar pb-1">
+                    {['1M', '3M', '6M', '1Y', 'YTD'].map(preset => (
+                      <button
+                        key={preset}
+                        onClick={() => handlePresetDate(preset)}
+                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] sm:text-xs font-bold rounded-full transition-colors whitespace-nowrap border border-gray-200"
+                      >
+                        {preset === '1M' ? '1개월' : preset === '3M' ? '3개월' : preset === '6M' ? '6개월' : preset === '1Y' ? '1년' : 'YTD(연초이후)'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <button
-                  onClick={fetchChartData}
-                  className="w-full sm:w-auto sm:ml-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 sm:py-1.5 rounded font-bold text-sm transition-colors"
-                >
-                  조회
-                </button>
               </div>
               <SyncChart data={chartData} selectedAssets={selectedAssets} loading={loadingChart} />
             </div>
