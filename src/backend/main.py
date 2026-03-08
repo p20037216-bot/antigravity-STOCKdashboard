@@ -128,7 +128,8 @@ async def get_market_overview():
             if asset["type"] == "stock":
                 df = get_stock_data(asset["symbol"], start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
             else:
-                df = get_crypto_data(f'{asset["symbol"]}/USDT')
+                # The new get_crypto_data handles symbol formatting internally
+                df = get_crypto_data(asset["symbol"])
                 
             if df is not None and not df.empty:
                 df_with_indicators = apply_indicators(df.copy())
@@ -192,7 +193,8 @@ async def compare_charts(payload: Dict[str, Any] = Body(...)):
             if asset_type == 'stock':
                 df = get_stock_data(sym, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
             else:
-                df = get_crypto_data(f'{sym}/USDT')
+                # The new get_crypto_data handles symbol formatting internally
+                df = get_crypto_data(sym)
                 # Crypto data might be longer, slice to timeframe
                 df = df[df.index >= start]
             
@@ -239,43 +241,52 @@ async def compare_valuations(payload: Dict[str, Any] = Body(...)):
 @app.get("/api/macro")
 async def get_macro_indicators():
     """Fetches key macroeconomic indicators using FRED API and YFinance."""
-    indicators = await get_all_macro_data()
-    
-    # Calculate overall traffic light status (how many negative signals?)
-    negative_count = sum(1 for item in indicators if item.get("impact") == "negative")
-    
-    status = "stable"
-    if negative_count >= 5:
-        status = "risk"
-    elif negative_count >= 2:
-        status = "warning"
+    try:
+        indicators = await get_all_macro_data()
         
-    ai_summary = [
-        "13개의 거시경제 지표 데이터를 바탕으로 분석한 기본 코멘트입니다.",
-        "현재 전체 지표 중 부정적 신호를 보내는 지표 개수를 주시하세요."
-    ]
+        # Calculate overall traffic light status (how many negative signals?)
+        negative_count = sum(1 for item in indicators if item.get("impact") == "negative")
         
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if api_key and "EXAMPLEKEY" not in api_key:
-        try:
-            import google.generativeai as genai
-            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
-            client = genai.Client(api_key=api_key)
-            prompt = f"투자전문가로서 거시경제 지표 요약을 보고 시장을 3개의 불릿포인트 문장으로(각각 짧게) 요약해주세요. 위험지표 갯수: {negative_count}개. 현재상태: {status}. 데이터일부: {indicators[:5]}"
-            response = client.models.generate_content(model=model_name, contents=prompt)
-            lines = [line.strip("- *").strip() for line in response.text.split("\n") if line.strip() and ("-" in line or "*" in line)]
-            if lines:
-                ai_summary = lines[:3]
-            else:
-                ai_summary = [response.text]
-        except Exception as e:
-            print(f"Macro AI Summary Error: {e}")
+        status = "stable"
+        if negative_count >= 5:
+            status = "risk"
+        elif negative_count >= 2:
+            status = "warning"
             
-    return {
-        "status": status,
-        "indicators": indicators,
-        "ai_summary": ai_summary
-    }
+        ai_summary = [
+            "13개의 거시경제 지표 데이터를 바탕으로 분석한 기본 코멘트입니다.",
+            "현재 전체 지표 중 부정적 신호를 보내는 지표 개수를 주시하세요."
+        ]
+            
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if api_key and "EXAMPLEKEY" not in api_key:
+            try:
+                import google.generativeai as genai
+                model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+                client = genai.Client(api_key=api_key)
+                prompt = f"투자전문가로서 거시경제 지표 요약을 보고 시장을 3개의 불릿포인트 문장으로(각각 짧게) 요약해주세요. 위험지표 갯수: {negative_count}개. 현재상태: {status}. 데이터일부: {indicators[:5]}"
+                response = client.models.generate_content(model=model_name, contents=prompt)
+                lines = [line.strip("- *").strip() for line in response.text.split("\n") if line.strip() and ("-" in line or "*" in line)]
+                if lines:
+                    ai_summary = lines[:3]
+                else:
+                    ai_summary = [response.text]
+            except Exception as e:
+                print(f"Macro AI Summary Error: {e}")
+                
+        return {
+            "status": status,
+            "indicators": indicators,
+            "ai_summary": ai_summary
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "warning",
+            "indicators": MOCK_DATA,
+            "ai_summary": [f"데이터를 불러오는 중 오류가 발생했습니다: {str(e)}", "FRED API KEY를 점검해주세요."]
+        }
 
 @app.post("/api/chat")
 async def chat_with_ai(payload: Dict[str, Any] = Body(...)):
