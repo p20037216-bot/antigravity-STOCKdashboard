@@ -23,6 +23,10 @@ env/
 .venv
 *.sqlite3
 
+# Secrets & Configs
+mcp_servers.json
+mcp_config.json
+
 # Editor directories and files
 .idea
 .vscode

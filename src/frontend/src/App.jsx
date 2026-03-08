@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Hash, BarChart3, TrendingUp, Globe, MessageSquare, X, Plus } from 'lucide-react';
+import { Search, Hash, BarChart3, TrendingUp, Globe, MessageSquare, X, Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { SyncChart } from './components/SyncChart';
 import { ValuationWidget } from './components/ValuationWidget';
 import { MacroWidget } from './components/MacroWidget';
@@ -37,6 +37,9 @@ function App() {
   // Valuation State
   const [valuationData, setValuationData] = useState([]);
   const [loadingValuation, setLoadingValuation] = useState(false);
+
+  // Mobile Header State
+  const [isHeaderExpanded, setIsHeaderExpanded] = useState(false);
 
   useEffect(() => {
     if (selectedAssets.length > 0) {
@@ -124,14 +127,38 @@ function App() {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-gray-900 font-sans pb-12">
       {/* Search Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm py-4">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm py-4 transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h1 className="text-2xl font-black flex items-center gap-2 mb-6 tracking-tight">
-            📊 차트뷰 <span className="text-sm font-medium text-gray-400">Sync-Compare Terminal V3</span>
-          </h1>
+          <div className="flex justify-between items-center mb-4 sm:mb-6">
+            <h1 className="text-xl sm:text-2xl font-black flex items-center gap-2 tracking-tight">
+              📊 차트뷰 <span className="text-xs sm:text-sm font-medium text-gray-400">Sync-Compare Terminal V3</span>
+            </h1>
+            <button
+              onClick={() => setIsHeaderExpanded(!isHeaderExpanded)}
+              className="sm:hidden flex items-center gap-1 text-[13px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full border border-blue-200"
+            >
+              {isHeaderExpanded ? <><ChevronUp size={14} /> 닫기</> : <><Search size={14} /> 종목검색 열기</>}
+            </button>
+          </div>
 
-          {/* Unified Search Input */}
-          <div className="bg-gray-100/50 p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm">
+          {/* Mobile Tag container for collapsed state */}
+          {!isHeaderExpanded && (
+            <div className="sm:hidden flex flex-wrap gap-1.5 mb-2">
+              {selectedAssets.map((asset, i) => {
+                const colors = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+                return (
+                  <div key={asset.symbol} className="flex items-center gap-1 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded shadow-sm text-xs">
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }}></span>
+                    <span className="font-bold text-gray-700">{asset.symbol}</span>
+                    <button onClick={() => handleRemoveAsset(asset.symbol)} className="text-gray-400 hover:text-red-500 ml-0.5"><X size={12} /></button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Unified Search Input (Collapsible on mobile) */}
+          <div className={`bg-gray-100/50 p-4 sm:p-6 rounded-xl border border-gray-200 shadow-sm ${isHeaderExpanded ? 'block' : 'hidden sm:block'}`}>
             <h2 className="font-bold text-gray-800 flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-4 text-sm sm:text-base">
               <span className="flex items-center gap-1"><Search size={18} /> 종목 검색</span>
               <span className="hidden sm:inline">·</span>
