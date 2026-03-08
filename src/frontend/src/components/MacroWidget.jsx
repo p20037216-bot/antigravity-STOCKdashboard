@@ -101,9 +101,15 @@ export function MacroWidget() {
                     if (ind.impact === 'negative') colorConfig = { text: "text-red-500", bg: "bg-red-50/50", border: "border-red-200", hex: "#ef4444", badge: "bg-red-100 text-red-700" };
 
                     return (
-                        <div key={ind.id} className={`bg-white border ${colorConfig.border} rounded-xl p-4 flex flex-col shadow-sm hover:shadow-md transition-shadow`}>
+                        <a
+                            key={ind.id}
+                            href={ind.link || "#"}
+                            target={ind.link && ind.link !== "#" ? "_blank" : "_self"}
+                            rel="noreferrer"
+                            className={`block bg-white border ${colorConfig.border} rounded-xl p-4 flex flex-col shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-pointer group`}
+                        >
                             <div className="flex justify-between items-start mb-2">
-                                <h5 className="font-bold text-[13px] text-gray-700 truncate pr-2" title={ind.name}>{ind.name}</h5>
+                                <h5 className="font-bold text-[13px] text-gray-700 truncate pr-2 group-hover:text-blue-600 transition-colors" title={ind.name}>{ind.name}</h5>
                                 <div className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex gap-1 items-center shrink-0 ${colorConfig.badge}`}>
                                     {ind.trend === 'up' ? <TrendingUp size={10} /> : ind.trend === 'down' ? <TrendingDown size={10} /> : <Minus size={10} />}
                                     {ind.impact === 'positive' ? '긍정' : ind.impact === 'negative' ? '부정' : '중립'}
@@ -121,7 +127,7 @@ export function MacroWidget() {
                             <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-500 leading-snug line-clamp-2" title={ind.desc}>
                                 {ind.desc}
                             </div>
-                        </div>
+                        </a>
                     );
                 })}
             </div>
