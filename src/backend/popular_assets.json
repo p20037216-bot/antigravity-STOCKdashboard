@@ -1,0 +1,62 @@
+[
+  {
+    "symbol": "AAPL",
+    "type": "stock",
+    "name": "Apple"
+  },
+  {
+    "symbol": "NVDA",
+    "type": "stock",
+    "name": "Nvidia"
+  },
+  {
+    "symbol": "TSLA",
+    "type": "stock",
+    "name": "Tesla"
+  },
+  {
+    "symbol": "MSFT",
+    "type": "stock",
+    "name": "Microsoft"
+  },
+  {
+    "symbol": "MSTR",
+    "type": "stock",
+    "name": "MicroStrategy"
+  },
+  {
+    "symbol": "005930.KS",
+    "type": "stock",
+    "name": "삼성전자"
+  },
+  {
+    "symbol": "000660.KS",
+    "type": "stock",
+    "name": "SK하이닉스"
+  },
+  {
+    "symbol": "035420.KS",
+    "type": "stock",
+    "name": "NAVER"
+  },
+  {
+    "symbol": "BTC",
+    "type": "crypto",
+    "name": "Bitcoin"
+  },
+  {
+    "symbol": "ETH",
+    "type": "crypto",
+    "name": "Ethereum"
+  },
+  {
+    "symbol": "SOL",
+    "type": "crypto",
+    "name": "Solana"
+  },
+  {
+    "symbol": "DOGE",
+    "type": "crypto",
+    "name": "Dogecoin"
+  }
+]

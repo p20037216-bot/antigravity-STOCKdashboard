@@ -9,3 +9,11 @@ requests
 # Install with: pip install 'mcp[cli]'
 # Or for just the core library: pip install mcp
 mcp[cli]>=1.0.0
+
+# Finance Dashboard
+yfinance
+fastapi
+uvicorn
+backtrader
+ccxt
+fredapi
