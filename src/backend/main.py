@@ -240,53 +240,80 @@ async def compare_valuations(payload: Dict[str, Any] = Body(...)):
 
 @app.get("/api/macro")
 async def get_macro_indicators():
-    """Fetches key macroeconomic indicators using FRED API and YFinance."""
+    """Fetches macroeconomic indicators by proxying another dedicated service."""
+    import requests
     try:
-        indicators = await get_all_macro_data()
-        
-        # Calculate overall traffic light status (how many negative signals?)
-        negative_count = sum(1 for item in indicators if item.get("impact") == "negative")
-        
-        status = "stable"
-        if negative_count >= 5:
-            status = "risk"
-        elif negative_count >= 2:
-            status = "warning"
+        # Fetch from the user's dedicated macro service
+        resp = requests.get("https://sync-compare-charts.onrender.com/api/macro", timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
             
-        ai_summary = [
-            "13개의 거시경제 지표 데이터를 바탕으로 분석한 기본 코멘트입니다.",
-            "현재 전체 지표 중 부정적 신호를 보내는 지표 개수를 주시하세요."
-        ]
+            # Map the external data format to match our frontend UI expectations (or pass it raw if we change UI)
+            # The external API returns {"results": [...], "net_liquidity": {...}, "summary": {...}}
             
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if api_key and "EXAMPLEKEY" not in api_key:
-            try:
-                import google.generativeai as genai
-                model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
-                client = genai.Client(api_key=api_key)
-                prompt = f"투자전문가로서 거시경제 지표 요약을 보고 시장을 3개의 불릿포인트 문장으로(각각 짧게) 요약해주세요. 위험지표 갯수: {negative_count}개. 현재상태: {status}. 데이터일부: {indicators[:5]}"
-                response = client.models.generate_content(model=model_name, contents=prompt)
-                lines = [line.strip("- *").strip() for line in response.text.split("\n") if line.strip() and ("-" in line or "*" in line)]
-                if lines:
-                    ai_summary = lines[:3]
-                else:
-                    ai_summary = [response.text]
-            except Exception as e:
-                print(f"Macro AI Summary Error: {e}")
+            indicators = []
+            negative_count = 0
+            
+            if "results" in data:
+                for item in data["results"]:
+                    # Determine impact purely for UI coloring based on change or logic (simplified here)
+                    impact = "neutral"
+                    # Default mapping for positive/negative based on generic rules
+                    if item["symbol"] in ["T10Y2Y", "T10Y3M"]:
+                        impact = "negative" if item["value"] < 0 else "positive"
+                    elif item["symbol"] in ["BAMLH0A0HYM2", "^VIX"]:
+                        impact = "negative" if item["value"] > 20 else ("neutral" if item["value"] > 4 else "positive")
+                        
+                    if impact == "negative":
+                        negative_count += 1
+                        
+                    indicators.append({
+                        "id": item["symbol"],
+                        "name": item["name"],
+                        "value": round(item["value"], 2),
+                        "impact": impact,
+                        "trend": "up" if item["change"] > 0 else ("down" if item["change"] < 0 else "flat"),
+                        "desc": item["desc"],
+                        "link": item.get("link", "#"),
+                        "history": [{"date": c["time"], "value": c["value"]} for c in item.get("chart_data", [])]
+                    })
+                    
+            if "net_liquidity" in data:
+                nl = data["net_liquidity"]
+                indicators.append({
+                    "id": nl["symbol"],
+                    "name": nl["name"],
+                    "value": round(nl["value"], 2),
+                    "impact": "positive" if nl["change"] > 0 else "negative",
+                    "trend": "up" if nl["change"] > 0 else "down",
+                    "desc": nl["desc"],
+                    "link": nl.get("link", "#"),
+                    "history": [{"date": c["time"], "value": c["value"]} for c in nl.get("chart_data", [])]
+                })
                 
-        return {
-            "status": status,
-            "indicators": indicators,
-            "ai_summary": ai_summary
-        }
+            status = "stable"
+            if "summary" in data and "level" in data["summary"]:
+                if data["summary"]["level"] == "red": status = "risk"
+                elif data["summary"]["level"] == "yellow": status = "warning"
+                elif data["summary"]["level"] == "green": status = "stable"
+                
+            ai_summary = [data["summary"].get("text", "요약 정보를 불러올 수 없습니다.")]
+
+            return {
+                "status": status,
+                "indicators": indicators,
+                "ai_summary": ai_summary
+            }
+            
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {
-            "status": "warning",
-            "indicators": FALLBACK_DATA,
-            "ai_summary": [f"데이터를 불러오는 중 오류가 발생했습니다: {str(e)}", "FRED API KEY를 점검해주세요."]
-        }
+        print(f"Proxy fetch error: {e}")
+        
+    # If proxy fails, return fallback
+    return {
+        "status": "warning",
+        "indicators": FALLBACK_DATA,
+        "ai_summary": ["외부 API에서 데이터를 불러오는 중 오류가 발생했습니다. 임시 데이터를 표시합니다."]
+    }
 
 @app.post("/api/chat")
 async def chat_with_ai(payload: Dict[str, Any] = Body(...)):
