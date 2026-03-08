@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from .data_collector import get_stock_data, get_crypto_data, get_valuation_metrics
 from .indicators import apply_indicators
 from .backtester import run_backtest
-from .ai_reporter import generate_investment_report, summarize_global_news
+from .ai_reporter import generate_investment_report, summarize_global_news, generate_analyst_report
 from .news_crawler import get_global_news
 from .macro_data import get_all_macro_data, FALLBACK_DATA
 import pandas as pd
@@ -314,6 +314,67 @@ async def get_macro_indicators():
         "indicators": FALLBACK_DATA,
         "ai_summary": ["외부 API에서 데이터를 불러오는 중 오류가 발생했습니다. 임시 데이터를 표시합니다."]
     }
+
+@app.post("/api/analyze/analyst")
+async def get_multi_analyst_report(payload: Dict[str, Any] = Body(...)):
+    """Generates detailed AI Analyst reports for multiple symbols."""
+    symbols = payload.get("symbols", [])
+    if not symbols:
+        raise HTTPException(status_code=400, detail="No symbols provided")
+        
+    analyses = []
+    end = datetime.now()
+    start = end - timedelta(days=730) # 2 years for tech analysis
+    
+    for asset in symbols:
+        sym = asset.get('symbol')
+        asset_type = asset.get('type')
+        
+        try:
+            # 1. Fetch Technical Data
+            if asset_type == 'stock':
+                df = get_stock_data(sym, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
+                # 2. Fetch Fundamental Data (only for stock)
+                fund_data = get_valuation_metrics(sym)
+            else:
+                df = get_crypto_data(sym)
+                fund_data = {"error": "Crypto assets do not have traditional fundamentals like P/E"}
+                
+            if df is not None and not df.empty:
+                df_with_indicators = apply_indicators(df.copy())
+                # Get latest row as dict, robust replacement for NaNs
+                latest_tech = df_with_indicators.iloc[-1].fillna(0).to_dict()
+                
+                # Prevent Date serialization crash
+                if 'Date' in latest_tech and isinstance(latest_tech['Date'], pd.Timestamp):
+                    latest_tech['Date'] = latest_tech['Date'].strftime('%Y-%m-%d')
+                    
+                company_name = getattr(fund_data, "get", lambda x,y: sym)('longName', sym) if isinstance(fund_data, dict) else sym
+                
+                # 3. Request Gemini AI Analysis
+                report = generate_analyst_report(sym, company_name, latest_tech, fund_data)
+                analyses.append(report)
+            else:
+                analyses.append({
+                    "symbol": sym,
+                    "company_name": sym,
+                    "signal": "Hold",
+                    "technical_analysis": f"{sym} 데이터를 불러올 수 없어 차트 분석이 불가능합니다.",
+                    "fundamental_analysis": f"{sym} 데이터를 불러올 수 없어 밸류에이션 분석이 불가능합니다.",
+                    "summary": "분석 불가"
+                })
+        except Exception as e:
+            print(f"Error processing analyst report for {sym}: {e}")
+            analyses.append({
+                "symbol": sym,
+                "company_name": sym,
+                "signal": "Hold",
+                "technical_analysis": "서버 내부 오류로 인하여 분석에 실패했습니다.",
+                "fundamental_analysis": "오류 발생",
+                "summary": "오류 발생"
+            })
+            
+    return {"analyses": analyses}
 
 @app.post("/api/chat")
 async def chat_with_ai(payload: Dict[str, Any] = Body(...)):

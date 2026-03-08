@@ -101,8 +101,74 @@ def summarize_global_news(news_data: dict) -> dict:
         return {
             "summary_points": ["Could not parse AI response", text]
         }
-    except Exception as e:
+        except Exception as e:
         print(f"News Summarization Error: {e}")
         return {
             "summary_points": ["Error requesting news summary from Gemini API."]
+        }
+
+def generate_analyst_report(symbol: str, company_name: str, tech_data: dict, fund_data: dict) -> dict:
+    """Uses Gemini 2.5 Flash to act as an AI Analyst and return a structured report."""
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key or "EXAMPLEKEY" in api_key:
+        return {
+            "symbol": symbol,
+            "company_name": company_name,
+            "signal": "Hold",
+            "technical_analysis": "API 에러: GOOGLE_API_KEY가 없습니다.",
+            "fundamental_analysis": "API 에러: GOOGLE_API_KEY가 없습니다.",
+            "summary": "API 연동 실패"
+        }
+        
+    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+    You are an elite Wall Street AI Analyst. Please perform a multi-perspective analysis on the following asset.
+    Asset: {company_name} ({symbol})
+    
+    Technical Data (Moving Averages, RSI, MACD, etc.):
+    {tech_data}
+    
+    Fundamental Data (P/E, P/B, Market Cap, Growth, etc.):
+    {fund_data}
+    
+    Based on the provided data, generate a comprehensive evaluation. 
+    Format your response EXACTLY as a JSON object with the following keys. Please write the content in highly professional Korean.
+    {{
+      "symbol": "{symbol}",
+      "company_name": "{company_name}",
+      "signal": "Choose exactly one: Strong Buy, Buy, Hold, Sell, Strong Sell",
+      "technical_analysis": "A concise 3-4 sentence paragraph summarizing technical trends (e.g. golden cross, RSI momentum). You may use markdown.",
+      "fundamental_analysis": "A concise 3-4 sentence paragraph summarizing fundamental valuation (e.g. undervalued, growth potential). You may use markdown.",
+      "summary": "A powerful 1-line final verdict summarizing your stance."
+    }}
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        text = response.text
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+             return json.loads(match.group(0))
+        return {
+            "symbol": symbol,
+            "company_name": company_name,
+            "signal": "Hold",
+            "technical_analysis": "데이터 분석 실패",
+            "fundamental_analysis": "데이터 분석 실패",
+            "summary": "알 수 없음"
+        }
+    except Exception as e:
+        print(f"Analyst Report Error for {symbol}: {e}")
+        return {
+             "symbol": symbol,
+             "company_name": company_name,
+             "signal": "Hold",
+             "technical_analysis": f"API 호출 중 오류가 발생했습니다: {str(e)}",
+             "fundamental_analysis": "오류 발생",
+             "summary": "분석 실패"
         }

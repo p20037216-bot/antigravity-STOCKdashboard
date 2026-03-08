@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Search, Hash, BarChart3, TrendingUp, Globe, MessageSquare, X, Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { SyncChart } from './components/SyncChart';
 import { ValuationWidget } from './components/ValuationWidget';
+import { AIAnalystTab } from './components/AIAnalystTab';
 import { MacroWidget } from './components/MacroWidget';
 import { AIChatWidget } from './components/AIChatWidget';
 import './index.css';
@@ -299,6 +300,12 @@ function App() {
             <TrendingUp size={18} className="sm:w-5 sm:h-5" /> <span>차트 비교</span>
           </button>
           <button
+            onClick={() => setActiveTab('analyst')}
+            className={`flex-1 py-3 sm:py-4 px-2 sm:px-0 text-center font-bold text-[13px] sm:text-base border-b-2 transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 min-w-[70px] whitespace-nowrap ${activeTab === 'analyst' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            <span className="text-xl leading-none">💡</span> <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">AI 애널리스트</span>
+          </button>
+          <button
             onClick={() => setActiveTab('valuation')}
             className={`flex-1 py-3 sm:py-4 px-2 sm:px-0 text-center font-bold text-[13px] sm:text-base border-b-2 transition-colors flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 min-w-[70px] whitespace-nowrap ${activeTab === 'valuation' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
@@ -363,6 +370,12 @@ function App() {
                 </div>
               </div>
               <SyncChart data={chartData} selectedAssets={selectedAssets} loading={loadingChart} />
+            </div>
+          )}
+
+          {activeTab === 'analyst' && (
+            <div className="animate-in fade-in duration-500">
+              <AIAnalystTab selectedAssets={selectedAssets} />
             </div>
           )}
 
