@@ -45,14 +45,16 @@ function App() {
   useEffect(() => {
     if (selectedAssets.length > 0) {
       fetchChartData();
-      if (activeTab === 'valuation') {
-        fetchValuationData();
-      }
     } else {
       setChartData([]);
-      setValuationData([]);
     }
-  }, [selectedAssets, activeTab]);
+  }, [selectedAssets]); // Only fetch chart when assets change
+
+  useEffect(() => {
+    if (selectedAssets.length > 0 && activeTab === 'valuation') {
+      fetchValuationData();
+    }
+  }, [selectedAssets, activeTab]); // Fetch valuation only when relevant
 
   const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001';
 

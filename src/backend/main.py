@@ -12,14 +12,48 @@ from datetime import datetime, timedelta
 import dotenv
 import math
 import os
+import time
+import logging
 
 # Load environment variables
 dotenv.load_dotenv()
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Antigravity Finance Dashboard API")
+
+# Simple In-Memory Cache with TTL
+class SimpleCache:
+    def __init__(self, ttl_seconds=3600):
+        self.cache = {}
+        self.ttl = ttl_seconds
+
+    def get(self, key):
+        if key in self.cache:
+            entry = self.cache[key]
+            if time.time() - entry['timestamp'] < self.ttl:
+                return entry['data']
+            else:
+                del self.cache[key]
+        return None
+
+    def set(self, key, data):
+        self.cache[key] = {
+            'data': data,
+            'timestamp': time.time()
+        }
+
+# Initialize caches
+analyze_cache = SimpleCache(ttl_seconds=3600)  # 1 hour
+news_cache = SimpleCache(ttl_seconds=1800)     # 30 mins
+overview_cache = SimpleCache(ttl_seconds=600)  # 10 mins
+macro_cache = SimpleCache(ttl_seconds=3600)    # 1 hour
 
 app.add_middleware(
     CORSMiddleware,
+    # In production, this should be restricted to the specific frontend domain
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -36,6 +70,12 @@ async def analyze_asset(asset_type: str, symbol: str):
     Analyzes an asset (stock/crypto) over 5 years.
     Returns indicators, backtest results, and AI analysis.
     """
+    cache_key = f"analyze_{asset_type}_{symbol}"
+    cached_res = analyze_cache.get(cache_key)
+    if cached_res:
+        logger.info(f"Returning cached analysis for {symbol}")
+        return cached_res
+
     try:
         # 1. Collect Data
         if asset_type.lower() == "stock":
@@ -43,7 +83,6 @@ async def analyze_asset(asset_type: str, symbol: str):
             start = end - timedelta(days=1825)
             df = get_stock_data(symbol, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
         elif asset_type.lower() == "crypto":
-            # CCXT expects something like "ETH/USDT"
             symbol_formatted = symbol if "/" in symbol else f"{symbol}/USDT"
             df = get_crypto_data(symbol_formatted)
         else:
@@ -59,57 +98,68 @@ async def analyze_asset(asset_type: str, symbol: str):
         backtest_results = run_backtest(df.copy())
         
         # 4. Generate AI Report
-        # Replace NaN with 0 to prevent JSON serialization errors
         df_clean = df_with_indicators.fillna(0)
         
-        # Fix infiniti/NaN numbers natively so json encoder doesnt crash
         for col in df_clean.select_dtypes(include=['float']).columns:
             df_clean[col] = df_clean[col].apply(lambda x: 0.0 if math.isnan(x) or math.isinf(x) else x)
 
         latest_data = df_clean.iloc[-1].to_dict()
         
-        # Prevent "Date" type serialization error if Date is an index
         if 'Date' in latest_data and isinstance(latest_data['Date'], pd.Timestamp):
             latest_data['Date'] = latest_data['Date'].strftime('%Y-%m-%d')
             
         ai_report = generate_investment_report(symbol, latest_data, backtest_results)
         
-        # Only return the last 100 days of data for the frontend chart to remain lightweight
         chart_data = df_clean.tail(100).reset_index()
-        # Ensure datetime is serializable
         if 'Date' in chart_data.columns:
             chart_data['Date'] = chart_data['Date'].dt.strftime('%Y-%m-%d')
             
         records = chart_data.to_dict(orient='records')
         
-        return {
+        result = {
             "symbol": symbol,
             "type": asset_type,
             "backtest_metrics": backtest_results,
             "ai_analysis": ai_report,
             "chart_data": records
         }
+        
+        analyze_cache.set(cache_key, result)
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error analyzing {symbol}: {e}")
+        # Avoid leaking raw exception details to the client
+        raise HTTPException(status_code=500, detail="An internal error occurred during analysis.")
 
 @app.get("/api/news")
 async def get_news_summary():
     """Fetches latest news and returns an AI summary."""
+    cached_news = news_cache.get("global_news")
+    if cached_news:
+        return cached_news
+
     try:
         news_data = get_global_news()
         ai_summary = summarize_global_news(news_data)
-        return {
+        result = {
             "raw_news": news_data,
             "ai_summary": ai_summary
         }
+        news_cache.set("global_news", result)
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching news: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch market news.")
 
 @app.get("/api/overview")
 async def get_market_overview():
-    """Gets a quick overview of predefined major assets (Stocks + Crypto) without AI generation to speed up load time."""
+    """Gets a quick overview of predefined major assets (Stocks + Crypto)."""
+    cached_overview = overview_cache.get("market_overview")
+    if cached_overview:
+        return cached_overview
+
     assets = [
         {"symbol": "AAPL", "type": "stock"},
         {"symbol": "TSLA", "type": "stock"},
@@ -128,14 +178,12 @@ async def get_market_overview():
             if asset["type"] == "stock":
                 df = get_stock_data(asset["symbol"], start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
             else:
-                # The new get_crypto_data handles symbol formatting internally
                 df = get_crypto_data(asset["symbol"])
                 
             if df is not None and not df.empty:
                 df_with_indicators = apply_indicators(df.copy())
                 backtest_results = run_backtest(df.copy())
                 
-                # Derive a quick signal based on MA crossing and RSI
                 latest = df_with_indicators.iloc[-1].fillna(0)
                 price = float(latest.get('close', 0))
                 sma20 = float(latest.get('SMA_20', 0))
@@ -157,16 +205,16 @@ async def get_market_overview():
                     "total_return": backtest_results.get("total_return_pct", 0)
                 })
         except Exception as e:
-            print(f"Skipping {asset['symbol']} due to error: {e}")
+            logger.warning(f"Skipping {asset['symbol']} due to error: {e}")
             
-    return {"overview": results}
+    result = {"overview": results}
+    overview_cache.set("market_overview", result)
+    return result
 
 @app.post("/api/compare/chart")
 async def compare_charts(payload: Dict[str, Any] = Body(...)):
     """Accepts a list of symbols and a timeframe, returning synchronized percentage returns."""
     symbols = payload.get("symbols", [])
-    
-    # Handle custom dates or fallback to 3 years
     start_date_str = payload.get("start_date")
     end_date_str = payload.get("end_date")
     
@@ -193,17 +241,13 @@ async def compare_charts(payload: Dict[str, Any] = Body(...)):
             if asset_type == 'stock':
                 df = get_stock_data(sym, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
             else:
-                # The new get_crypto_data handles symbol formatting internally
                 df = get_crypto_data(sym)
-                # Crypto data might be longer, slice to timeframe
                 df = df[df.index >= start]
             
             if df is not None and not df.empty:
-                # Calculate percentage return from the first valid close price in the window
                 base_price = df['close'].iloc[0]
                 df['pct_return'] = ((df['close'] - base_price) / base_price) * 100
                 
-                # Convert to dict format with string dates for JSON
                 for date, row in df.iterrows():
                     date_str = date.strftime('%Y-%m-%d')
                     if date_str not in combined_data:
@@ -211,9 +255,8 @@ async def compare_charts(payload: Dict[str, Any] = Body(...)):
                     
                     combined_data[date_str][sym] = 0.0 if math.isnan(row['pct_return']) else float(row['pct_return'])
         except Exception as e:
-            print(f"Error processing {sym} for chart compare: {e}")
+            logger.error(f"Error processing {sym} for chart compare: {e}")
             
-    # Sort the dictionary by date and return as a flat list
     sorted_records = [combined_data[d] for d in sorted(combined_data.keys())]
     return {"chart_data": sorted_records}
 
@@ -240,32 +283,27 @@ async def compare_valuations(payload: Dict[str, Any] = Body(...)):
 
 @app.get("/api/macro")
 async def get_macro_indicators():
-    """Fetches macroeconomic indicators by proxying another dedicated service."""
+    """Fetches macroeconomic indicators."""
+    cached_macro = macro_cache.get("macro_indicators")
+    if cached_macro:
+        return cached_macro
+
     import requests
     try:
-        # Fetch from the user's dedicated macro service
-        resp = requests.get("https://sync-compare-charts.onrender.com/api/macro", timeout=15)
+        # Use environment variable for proxy URL if available
+        macro_proxy_url = os.getenv("MACRO_PROXY_URL", "https://sync-compare-charts.onrender.com/api/macro")
+        resp = requests.get(macro_proxy_url, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             
-            # Map the external data format to match our frontend UI expectations (or pass it raw if we change UI)
-            # The external API returns {"results": [...], "net_liquidity": {...}, "summary": {...}}
-            
             indicators = []
-            negative_count = 0
-            
             if "results" in data:
                 for item in data["results"]:
-                    # Determine impact purely for UI coloring based on change or logic (simplified here)
                     impact = "neutral"
-                    # Default mapping for positive/negative based on generic rules
                     if item["symbol"] in ["T10Y2Y", "T10Y3M"]:
                         impact = "negative" if item["value"] < 0 else "positive"
                     elif item["symbol"] in ["BAMLH0A0HYM2", "^VIX"]:
                         impact = "negative" if item["value"] > 20 else ("neutral" if item["value"] > 4 else "positive")
-                        
-                    if impact == "negative":
-                        negative_count += 1
                         
                     indicators.append({
                         "id": item["symbol"],
@@ -299,20 +337,21 @@ async def get_macro_indicators():
                 
             ai_summary = [data["summary"].get("text", "요약 정보를 불러올 수 없습니다.")]
 
-            return {
+            result = {
                 "status": status,
                 "indicators": indicators,
                 "ai_summary": ai_summary
             }
+            macro_cache.set("macro_indicators", result)
+            return result
             
     except Exception as e:
-        print(f"Proxy fetch error: {e}")
+        logger.error(f"Macro fetch error: {e}")
         
-    # If proxy fails, return fallback
     return {
         "status": "warning",
         "indicators": FALLBACK_DATA,
-        "ai_summary": ["외부 API에서 데이터를 불러오는 중 오류가 발생했습니다. 임시 데이터를 표시합니다."]
+        "ai_summary": ["데이터를 실시간으로 불러오는 중 오류가 발생했습니다. 임시 데이터를 표시합니다."]
     }
 
 @app.post("/api/analyze/analyst")
@@ -324,55 +363,43 @@ async def get_multi_analyst_report(payload: Dict[str, Any] = Body(...)):
         
     analyses = []
     end = datetime.now()
-    start = end - timedelta(days=730) # 2 years for tech analysis
+    start = end - timedelta(days=730)
     
     for asset in symbols:
         sym = asset.get('symbol')
         asset_type = asset.get('type')
         
+        cache_key = f"analyst_{sym}"
+        cached_report = analyze_cache.get(cache_key)
+        if cached_report:
+            analyses.append(cached_report)
+            continue
+
         try:
-            # 1. Fetch Technical Data
             if asset_type == 'stock':
                 df = get_stock_data(sym, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
-                # 2. Fetch Fundamental Data (only for stock)
                 fund_data = get_valuation_metrics(sym)
             else:
                 df = get_crypto_data(sym)
-                fund_data = {"error": "Crypto assets do not have traditional fundamentals like P/E"}
+                fund_data = {"error": "Crypto assets do not have traditional fundamentals"}
                 
             if df is not None and not df.empty:
                 df_with_indicators = apply_indicators(df.copy())
-                # Get latest row as dict, robust replacement for NaNs
                 latest_tech = df_with_indicators.iloc[-1].fillna(0).to_dict()
                 
-                # Prevent Date serialization crash
                 if 'Date' in latest_tech and isinstance(latest_tech['Date'], pd.Timestamp):
                     latest_tech['Date'] = latest_tech['Date'].strftime('%Y-%m-%d')
                     
                 company_name = getattr(fund_data, "get", lambda x,y: sym)('longName', sym) if isinstance(fund_data, dict) else sym
-                
-                # 3. Request Gemini AI Analysis
                 report = generate_analyst_report(sym, company_name, latest_tech, fund_data)
+                
+                analyze_cache.set(cache_key, report)
                 analyses.append(report)
             else:
-                analyses.append({
-                    "symbol": sym,
-                    "company_name": sym,
-                    "signal": "Hold",
-                    "technical_analysis": f"{sym} 데이터를 불러올 수 없어 차트 분석이 불가능합니다.",
-                    "fundamental_analysis": f"{sym} 데이터를 불러올 수 없어 밸류에이션 분석이 불가능합니다.",
-                    "summary": "분석 불가"
-                })
+                analyses.append({"symbol": sym, "signal": "Hold", "summary": "데이터 부족"})
         except Exception as e:
-            print(f"Error processing analyst report for {sym}: {e}")
-            analyses.append({
-                "symbol": sym,
-                "company_name": sym,
-                "signal": "Hold",
-                "technical_analysis": "서버 내부 오류로 인하여 분석에 실패했습니다.",
-                "fundamental_analysis": "오류 발생",
-                "summary": "오류 발생"
-            })
+            logger.error(f"Error generating analyst report for {sym}: {e}")
+            analyses.append({"symbol": sym, "signal": "Hold", "summary": "분석 오류"})
             
     return {"analyses": analyses}
 
@@ -387,10 +414,10 @@ async def chat_with_ai(payload: Dict[str, Any] = Body(...)):
          
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key or "EXAMPLEKEY" in api_key:
-        return {"answer": "Error: Google API Key is missing. Please add it to your .env file."}
+        return {"answer": "API 키가 설정되지 않았습니다."}
         
     import google.generativeai as genai
-    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash") # Fixed model name
     client = genai.Client(api_key=api_key)
     
     asset_names = ", ".join([s['symbol'] for s in symbols])
@@ -403,25 +430,21 @@ async def chat_with_ai(payload: Dict[str, Any] = Body(...)):
         )
         return {"answer": response.text}
     except Exception as e:
-        print(f"Chat API Error: {e}")
-        return {"answer": "AI 응답을 생성하는 중 오류가 발생했습니다."}
+        logger.error(f"Chat API Error: {e}")
+        return {"answer": "AI 응답 생성 중 오류가 발생했습니다."}
 
 @app.get("/api/trending")
 async def get_trending_assets():
-    """Returns the list of on-demand trending assets generated by the background crawler."""
+    """Returns trending assets."""
     try:
-        # Load from the JSON file created by the crawler
         import json
-        import os
         filepath = os.path.join(os.path.dirname(__file__), "popular_assets.json")
         if os.path.exists(filepath):
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return {"assets": data}
-        else:
-            return {"assets": []}
+        return {"assets": []}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Trending assets load error: {e}")
         raise HTTPException(status_code=500, detail="Failed to load trending assets")
 

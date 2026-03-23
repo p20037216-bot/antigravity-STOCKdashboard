@@ -1,19 +1,43 @@
 import os
 import json
 import re
+import logging
 from google import genai
 
+logger = logging.getLogger(__name__)
+
+def extract_json(text: str) -> dict:
+    """Robustly extract JSON from a string that might contain markdown or other text."""
+    try:
+        # First attempt: directly parse
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Second attempt: look for JSON object using regex
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                # Third attempt: try to fix common AI JSON errors like trailing commas
+                fixed_json = re.sub(r',\s*\}', '}', match.group(0))
+                fixed_json = re.sub(r',\s*\]', ']', fixed_json)
+                try:
+                    return json.loads(fixed_json)
+                except json.JSONDecodeError:
+                    pass
+    return None
+
 def generate_investment_report(symbol: str, latest_metrics: dict, backtest_results: dict) -> dict:
-    """Uses Gemini 2.5 Flash to generate an investment opinion based on data."""
+    """Uses Gemini to generate an investment opinion based on data."""
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key or "EXAMPLEKEY" in api_key:
         return {
-            "buy_reason": "API Key is missing or invalid. Set GOOGLE_API_KEY in .env.",
+            "buy_reason": "API Key is missing. Please set GOOGLE_API_KEY.",
             "sell_reason": "API Key is missing.",
             "overall_opinion": "Hold"
         }
         
-    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -38,52 +62,48 @@ def generate_investment_report(symbol: str, latest_metrics: dict, backtest_resul
             contents=prompt
         )
         
-        text = response.text
-        # Remove markdown ticks to extract pure JSON
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
+        result = extract_json(response.text)
+        if result:
+            return result
+            
+        logger.warning(f"Failed to parse AI response for {symbol}: {response.text[:100]}...")
         return {
-            "error": "Could not parse AI response", 
-            "raw": text,
+            "buy_reason": "Analysis data received but could not be formatted.",
+            "sell_reason": "Analysis data received but could not be formatted.",
             "overall_opinion": "Hold"
         }
     except Exception as e:
-        print(f"AI Generation Error: {e}")
+        logger.error(f"AI Generation Error for {symbol}: {e}")
         return {
-            "buy_reason": "Error generating insight from Gemini API.",
-            "sell_reason": "Error generating insight from Gemini API.",
+            "buy_reason": "Error connecting to AI analysis service.",
+            "sell_reason": "Error connecting to AI analysis service.",
             "overall_opinion": "Hold"
         }
 
 def summarize_global_news(news_data: dict) -> dict:
-    """Uses Gemini 2.5 Flash to summarize the global news into a 3-line Threads format."""
+    """Uses Gemini to summarize the global news into a 3-line format."""
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key or "EXAMPLEKEY" in api_key:
         return {
-            "summary_points": [
-                "API 키가 누락되어 뉴스 요약을 가져올 수 없습니다.",
-                "1. .env 파일에 GOOGLE_API_KEY를 추가하세요.",
-                "2. 그리고 백엔드 서버를 다시 시작하세요."
-            ]
+            "summary_points": ["API 키가 설정되지 않았습니다."]
         }
         
-    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an expert financial writer. Please read the following news headlines and descriptions from the stock market and crypto market today.
+    You are an expert financial writer. Please read the following news headlines.
     
     News Data:
     {json.dumps(news_data, indent=2, ensure_ascii=False)}
     
-    Write a highly engaging, emotionless but professional 3-bullet-point summary of the global markets right now for a "Threads" post.
+    Write a professional 3-bullet-point summary of the global markets right now.
     Format your response EXACTLY as a JSON object with this key:
     {{
       "summary_points": [
-        "First point about macro/stocks...",
-        "Second point about crypto...",
-        "Third point highlighting a specific trend or warning..."
+        "Point 1...",
+        "Point 2...",
+        "Point 3..."
       ]
     }}
     Please write the content in Korean.
@@ -94,54 +114,42 @@ def summarize_global_news(news_data: dict) -> dict:
             model=model_name,
             contents=prompt
         )
-        text = response.text
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        return {
-            "summary_points": ["Could not parse AI response", text]
-        }
+        result = extract_json(response.text)
+        if result:
+            return result
+        return {"summary_points": ["뉴스 요약을 분석할 수 없습니다."]}
     except Exception as e:
-        print(f"News Summarization Error: {e}")
-        return {
-            "summary_points": ["Error requesting news summary from Gemini API."]
-        }
+        logger.error(f"News Summarization Error: {e}")
+        return {"summary_points": ["뉴스 요약 생성 중 오류가 발생했습니다."]}
 
 def generate_analyst_report(symbol: str, company_name: str, tech_data: dict, fund_data: dict) -> dict:
-    """Uses Gemini 2.5 Flash to act as an AI Analyst and return a structured report."""
+    """Uses Gemini to act as an AI Analyst and return a structured report."""
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key or "EXAMPLEKEY" in api_key:
         return {
             "symbol": symbol,
             "company_name": company_name,
             "signal": "Hold",
-            "technical_analysis": "API 에러: GOOGLE_API_KEY가 없습니다.",
-            "fundamental_analysis": "API 에러: GOOGLE_API_KEY가 없습니다.",
-            "summary": "API 연동 실패"
+            "summary": "API 키 누락"
         }
         
-    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    You are an elite Wall Street AI Analyst. Please perform a multi-perspective analysis on the following asset.
-    Asset: {company_name} ({symbol})
+    You are an elite AI Financial Analyst. Analyze {company_name} ({symbol}).
     
-    Technical Data (Moving Averages, RSI, MACD, etc.):
-    {tech_data}
+    Technical: {tech_data}
+    Fundamental: {fund_data}
     
-    Fundamental Data (P/E, P/B, Market Cap, Growth, etc.):
-    {fund_data}
-    
-    Based on the provided data, generate a comprehensive evaluation. 
-    Format your response EXACTLY as a JSON object with the following keys. Please write the content in highly professional Korean.
+    Return a JSON object:
     {{
       "symbol": "{symbol}",
       "company_name": "{company_name}",
-      "signal": "Choose exactly one: Strong Buy, Buy, Hold, Sell, Strong Sell",
-      "technical_analysis": "A concise 3-4 sentence paragraph summarizing technical trends (e.g. golden cross, RSI momentum). You may use markdown.",
-      "fundamental_analysis": "A concise 3-4 sentence paragraph summarizing fundamental valuation (e.g. undervalued, growth potential). You may use markdown.",
-      "summary": "A powerful 1-line final verdict summarizing your stance."
+      "signal": "Strong Buy/Buy/Hold/Sell/Strong Sell",
+      "technical_analysis": "Concise summary in Korean",
+      "fundamental_analysis": "Concise summary in Korean",
+      "summary": "Final verdict in Korean"
     }}
     """
     
@@ -150,25 +158,10 @@ def generate_analyst_report(symbol: str, company_name: str, tech_data: dict, fun
             model=model_name,
             contents=prompt
         )
-        text = response.text
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-             return json.loads(match.group(0))
-        return {
-            "symbol": symbol,
-            "company_name": company_name,
-            "signal": "Hold",
-            "technical_analysis": "데이터 분석 실패",
-            "fundamental_analysis": "데이터 분석 실패",
-            "summary": "알 수 없음"
-        }
+        result = extract_json(response.text)
+        if result:
+             return result
+        return {"symbol": symbol, "signal": "Hold", "summary": "분석 결과 파싱 실패"}
     except Exception as e:
-        print(f"Analyst Report Error for {symbol}: {e}")
-        return {
-             "symbol": symbol,
-             "company_name": company_name,
-             "signal": "Hold",
-             "technical_analysis": f"API 호출 중 오류가 발생했습니다: {str(e)}",
-             "fundamental_analysis": "오류 발생",
-             "summary": "분석 실패"
-        }
+        logger.error(f"Analyst Report Error for {symbol}: {e}")
+        return {"symbol": symbol, "signal": "Hold", "summary": "AI 분석 중 오류 발생"}
